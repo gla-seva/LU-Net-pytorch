@@ -4,6 +4,7 @@ import numpy as np
 
 #paths
 dataset = "/home/vglasov/datasets/L_CAS_3D_Point_Cloud_People_Dataset/3D Point Cloud People Dataset/"
+synthetic_dataset = "/home/vglasov/datasets/L_CAS_3D_Point_Cloud_People_Dataset/Synthetic 3D Point Cloud People Dataset/"
 
 #Lidar image spec
 eps = 1e-6
