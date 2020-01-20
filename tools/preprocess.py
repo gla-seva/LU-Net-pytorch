@@ -6,10 +6,13 @@ import pandas as pd
 os.chdir("/home/vglasov/Reseach/LU-Net-pytorch/")
 import config
 
+def vect_mult(w, x):
+    return w.dot(x)
+
 class Pcd2ImageTransform:
-    def __init__(self, shape=config.shape, angular=config.angular, rand_angle=False):
+    def __init__(self, shape=config.shape, angular=config.angular, augmentation=None):
         self.height, self.width = shape
-        self.rand_angle = rand_angle
+        self.augmentation = augmentation
         y_angular, x_angular = angular
         self.x_delta, self.y_delta = x_angular / self.width, y_angular / self.height
     
@@ -26,21 +29,10 @@ class Pcd2ImageTransform:
             raise RuntimeError("Point Cloud must be non-empty")
             
         self.pcd = pcd
+        
         x, y, z = np.array(self.pcd.points).T
-        r = np.sqrt(x**2 + y**2 + z**2)
-        
-        random_azimuth_shift = np.random.uniform(-np.pi, np.pi) if self.rand_angle else 0.
-        
-        azimuth_angle = (np.arctan2(x, y) + random_azimuth_shift) % (2 * np.pi)
-        elevation_angle = np.arcsin(z / r)
-        
-        x_img = np.floor(azimuth_angle / self.x_delta).astype(int)
-        y_img = np.floor(elevation_angle / self.y_delta).astype(int)
-        
-#         x_img -= x_img.min()
-        y_img -= y_img.min()
-        
         self.pcd_labels = np.zeros(len(self.pcd.points), dtype=int)
+        
         for x_min, y_min, z_min, x_max, y_max, z_max in label_list:            
             self.pcd_labels[np.all([x_min <= x,
                                     y_min <= y, 
@@ -48,6 +40,51 @@ class Pcd2ImageTransform:
                                     x <= x_max,
                                     y <= y_max,
                                     z <= z_max], axis=0)] = 1
+        
+        
+        if self.augmentation is not None:
+#             if self.augmentation['squeeze']:
+#                 x_squeeze = np.random.uniform(0.9, 1.1)
+#                 y_squeeze = np.random.uniform(0.9, 1.1)
+#                 transform = np.eye(4)
+#                 transform[0,0] = x_squeeze
+#                 transform[1,1] = y_squeeze
+#                 self.pcd = self.pcd.transform(transform)
+            if self.augmentation['rotate']:
+                z_phi = np.random.uniform(-np.pi, np.pi)
+                rotation_matrix = o3d.geometry.get_rotation_matrix_from_xyz([0.,0.,z_phi])
+                transform = np.eye(4)
+                transform[0:3,0:3] = rotation_matrix
+                self.pcd = self.pcd.transform(transform)
+            if self.augmentation['flip']:
+                x_flip = np.random.choice([-1.,1.])
+                y_flip = np.random.choice([-1.,1.])
+                transform = np.eye(4)
+                transform[0,0] = x_flip
+                transform[1,1] = y_flip
+                self.pcd = self.pcd.transform(transform)
+            if self.augmentation['slanting']:
+                x, y, z = np.array(self.pcd.points).T
+                shift = np.random.uniform(-0.025, 0.025)
+                transform = np.array([[ np.cos(shift * z), np.sin(shift * z), np.zeros_like(z)],
+                                      [-np.sin(shift * z), np.cos(shift * z), np.zeros_like(z)],
+                                      [ np.zeros_like(z) , np.zeros_like(z) , np.ones_like(z)]])
+                
+                f_trans = np.vectorize(vect_mult, signature='(m,n),(n)->(m)')
+                self.pcd.points = o3d.utility.Vector3dVector(f_trans(np.transpose(transform, (-1, 0, 1)), self.pcd.points))
+            if self.augmentation['shuffling']:
+                self.pcd.points = o3d.utility.Vector3dVector(self.pcd.points + 0.01 * np.random.randn(len(self.pcd.points), 3))
+
+        x, y, z = np.array(self.pcd.points).T    
+        r = np.sqrt(x**2 + y**2 + z**2)
+        
+        azimuth_angle = np.arctan2(x, y) % (2 * np.pi)
+        elevation_angle = np.arcsin(z / r)
+        
+        x_img = np.floor(azimuth_angle / self.x_delta).astype(int)
+        y_img = np.floor(elevation_angle / self.y_delta).astype(int)
+        
+        y_img -= y_img.min()
         
         self.transformation = pd.DataFrame({'x': x, 
                                             'y': y,
@@ -74,9 +111,9 @@ class Pcd2ImageTransform:
         a, b = np.meshgrid(range(0, config.shape[0]), range(0, config.shape[1]))
         template = pd.DataFrame({'y_img': a.reshape(-1), 'x_img': b.reshape(-1)}).set_index(['y_img', 'x_img'])
         
-        xyz = self.transformation.groupby(['y_img', 'x_img'])['x', 'y', 'z'].mean()
+        xyz = self.transformation.groupby(['y_img', 'x_img'])['x', 'y', 'z'].median()
         r   = self.transformation.groupby(['y_img', 'x_img'])['r'].min()
-        lb  = self.transformation.groupby(['y_img', 'x_img'])['label'].mean()
+        lb  = self.transformation.groupby(['y_img', 'x_img'])['label'].max()
         
         X = template.join(xyz['x']).unstack(fill_value=0.).values[::-1, :]
         Y = template.join(xyz['y']).unstack(fill_value=0.).values[::-1, :]
@@ -105,10 +142,10 @@ class Pcd2ImageTransform:
         prediction = np.zeros(len(self.transformation))
         for y, x in zip(*np.where(labels)):
             prediction[(self.transformation['x_img'] == x) & (self.transformation['y_img'] == y)] = 1
-        pcd = o3d.PointCloud(self.pcd)
-        pcd.colors = o3d.Vector3dVector(np.vstack((prediction,
-                                                   np.zeros_like(prediction),
-                                                   prediction)).T)
+        pcd = o3d.geometry.PointCloud(self.pcd)
+        pcd.colors = o3d.utility.Vector3dVector(np.vstack((prediction,
+                                                           np.zeros_like(prediction),
+                                                           prediction)).T)
         return pcd
     
 # if __name__ == "__main__":
