@@ -16,8 +16,9 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 class batch_loader(Dataset):
-    def __init__(self, root_dir):
+    def __init__(self, root_dir, augmentation=None):
         self.landmarks_frame = pd.read_csv(root_dir)
+        self.augmentation = augmentation
         
     def _read_labels(self, labels_path):
         return [list(map(float, f.split()[4:10])) for f in open(labels_path, "r").readlines()]
@@ -26,10 +27,10 @@ class batch_loader(Dataset):
         pcd_path = self.landmarks_frame.iloc[idx, 0]
         labels_path = self.landmarks_frame.iloc[idx, 1]
 
-        pcd = o3d.read_point_cloud(pcd_path)
+        pcd = o3d.io.read_point_cloud(pcd_path)
         labels_list = self._read_labels(labels_path)
         
-        pcd2img = preprocess.Pcd2ImageTransform(rand_angle=True).fit(pcd, labels_list)
+        pcd2img = preprocess.Pcd2ImageTransform(augmentation=self.augmentation).fit(pcd, labels_list)
         data = pcd2img.transform()
         
         mask = data[:,:,0] != 0

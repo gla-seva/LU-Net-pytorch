@@ -11,4 +11,7 @@ eps = 1e-6
 shape = (16, 384) #image shape
 angular = (0.5236, 2 * np.pi) # approximation of 30º and 360º
 
-
+augmentation = {'rotate': True,
+                'flip': True,
+                'slanting': True,
+                'shuffling': True}
